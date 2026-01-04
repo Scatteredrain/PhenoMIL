@@ -1,0 +1,687 @@
+import os
+
+import numpy as np
+import torch.utils.data as data
+import torchvision.transforms as transforms
+
+from PIL import Image
+
+from utils.custom_transforms import *
+import random
+
+def read_index_from_file(file_path):
+    """
+    从文件读取列表，每行去除换行符。
+
+    参数:
+        file_path (str): 文件路径
+
+    返回:
+        index_list (list): 文件夹名列表
+    """
+    index_list = []
+    with open(file_path, 'r') as file:
+        for line in file:
+            index_list.append(line.strip())
+    return index_list
+
+
+class PolypDataset(data.Dataset):
+    def __init__(self, image_root, index_root, transform_list, is_transform, is_train=True, testsize=299):
+        file_index = read_index_from_file(index_root)
+        if not is_train:
+            fuji_index = read_index_from_file("/mnt/data/yizhenyu/data/HP识别/workspace/MIL-HP_yzy/configs/old_data_cross_fold/fuji.txt")
+        else:
+            fuji_index = []
+        fuji_index = []
+        self.is_train = is_train
+        self.bags = []
+        self.labels= []
+        self.names = []
+
+        self.bags_n = []
+        self.labels_n= []
+        self.names_n = []
+        self.bags_p = []
+        self.labels_p= []
+        self.names_p = []
+
+        for date in os.listdir(image_root):
+            if date.endswith('.xlsx'): continue
+            for folder in os.listdir(os.path.join(image_root, date)):
+                if folder not in file_index or folder in fuji_index:
+                    continue
+                images = []
+                for f in os.listdir(os.path.join(image_root, date, folder)):
+                    if f.endswith('.jpg') or f.endswith('.png') or f.endswith('.bmp') or f.endswith('.BMP') or f.endswith('.JPG'):
+                        images.append(os.path.join(image_root, date, folder, f))
+                self.bags.append(images)
+                self.names.append(folder)
+                if int(folder) <= 570:
+                    self.labels.append(1)
+                    self.bags_p.append(images)
+                    self.names_p.append(folder)
+                    self.labels_p.append(1)
+                else:
+                    self.labels.append(0)
+                    self.bags_n.append(images)
+                    self.names_n.append(folder)
+                    self.labels_n.append(0)
+        if is_transform:
+            self.transform = self.get_transform(transform_list)
+        else:
+            self.transform = transforms.Compose([
+            transforms.Resize((testsize, testsize)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        
+    @staticmethod
+    def get_transform(transform_list):
+        tfs = []
+        for key, value in zip(transform_list.keys(), transform_list.values()):
+            if value is not None:
+                tf = eval(key)(**value)
+            else:
+                tf = eval(key)()
+            tfs.append(tf)
+        return transforms.Compose(tfs)
+
+    def __getitem__(self, index):
+        images = self.bags[index]
+        label = self.labels[index]
+        name = self.names[index]
+        images_tensor = []
+        label_tensor = []
+        name_tensor = []
+        for img_path in images:
+            image = Image.open(img_path).convert('RGB')
+            if self.is_train:
+                sample = {"image": image}
+                sample = self.transform(sample)
+                images_tensor.append(sample["image"])
+            else:
+                sample = self.transform(image)
+                images_tensor.append(sample)
+            
+            label_tensor.append(torch.tensor(label))
+            name_tensor.append(os.path.split(img_path)[-1])
+        
+        return torch.stack(images_tensor), torch.tensor(label_tensor), name_tensor
+    
+    def random_choose_nocancer_img(self):
+        combined = list(zip(self.bags_n, self.labels_n, self.names_n))
+        random.shuffle(combined)
+        self.bags_n[:], self.labels_n[:], self.names_n[:] = zip(*combined)
+
+        # 正样本数量
+        num_p = len(self.bags_p[:])
+
+        self.bags = self.bags_p + self.bags_n[:num_p]
+        self.labels = self.labels_p + self.labels_n[:num_p]
+        self.names = self.names_p + self.names_n[:num_p]
+        # combined = list(zip(self.bags, self.labels, self.names))
+        # random.shuffle(combined)
+        # self.bags[:], self.labels[:], self.names[:] = zip(*combined)
+
+    def __len__(self):
+        if self.is_train:
+            return len(self.bags_p) * 2
+        else:
+            return len(self.bags)
+        
+class PolypDataset_test(data.Dataset):
+    def __init__(self, index_root, hp_image_root, nohp_image_root, transform_list, is_transform, is_train=True, testsize=352):
+        file_index = read_index_from_file(index_root)
+        # problem_index = read_index_from_file("/nas/qingcheng.xjw/workspace/MIL-HP/configs/new_data_cross_fold/problem_patient.txt")
+        self.is_train = is_train
+        self.bags = []
+        self.labels= []
+        self.names = []
+
+        self.bags_n = []
+        self.labels_n= []
+        self.names_n = []
+        self.bags_p = []
+        self.labels_p= []
+        self.names_p = []
+
+        for date in os.listdir(hp_image_root):
+            if date not in file_index:
+                continue
+            images = []
+            for f in os.listdir(os.path.join(hp_image_root, date)):
+                if f.endswith('.jpg') or f.endswith('.png') or f.endswith('.bmp') or f.endswith('.BMP') or f.endswith('.JPG') or f.endswith('.Jpg'):
+                # if f.endswith('pg'):
+                    images.append(os.path.join(hp_image_root, date, f))
+            
+            if len(images) < 7:
+                continue
+            self.bags.append(images)
+            self.names.append(date)
+            self.labels.append(1)
+            
+            self.bags_p.append(images)
+            self.names_p.append(date)
+            self.labels_p.append(1)
+        
+        for date in os.listdir(nohp_image_root):
+            if date not in file_index:
+                continue
+            images = []
+            for f in os.listdir(os.path.join(nohp_image_root, date)):
+                if f.endswith('.jpg') or f.endswith('.png') or f.endswith('.bmp') or f.endswith('.BMP') or f.endswith('.JPG') or f.endswith('.Jpg'):
+                # if f.endswith('pg'):
+                    images.append(os.path.join(nohp_image_root, date, f))
+            
+            if len(images) < 7:
+                continue
+            self.bags.append(images)
+            self.names.append(date)
+            self.labels.append(0)
+
+            self.bags_n.append(images)
+            self.names_n.append(date)
+            self.labels_n.append(0)
+
+        if is_transform:
+            self.transform = self.get_transform(transform_list)
+        else:
+            self.transform = transforms.Compose([
+            transforms.Resize((testsize, testsize)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        
+    @staticmethod
+    def get_transform(transform_list):
+        tfs = []
+        for key, value in zip(transform_list.keys(), transform_list.values()):
+            if value is not None:
+                tf = eval(key)(**value)
+            else:
+                tf = eval(key)()
+            tfs.append(tf)
+        return transforms.Compose(tfs)
+
+    def __getitem__(self, index):
+        images = self.bags[index]
+        label = self.labels[index]
+        name = self.names[index]
+        images_tensor = []
+        label_tensor = []
+        name_tensor = []
+        for img_path in images:
+            image = Image.open(img_path).convert('RGB')
+            if self.is_train:
+                sample = {"image": image}
+                sample = self.transform(sample)
+                images_tensor.append(sample["image"])
+            else:
+                sample = self.transform(image)
+                images_tensor.append(sample)
+            
+            label_tensor.append(torch.tensor(label))
+            name_tensor.append(os.path.split(img_path)[-1])
+        
+        return torch.stack(images_tensor), torch.tensor(label_tensor), name_tensor
+    
+    def random_choose_nocancer_img(self):
+        combined = list(zip(self.bags_n, self.labels_n, self.names_n))
+        random.shuffle(combined)
+        self.bags_n[:], self.labels_n[:], self.names_n[:] = zip(*combined)
+
+        # 正样本数量
+        num_p = len(self.bags_p[:])
+
+        self.bags = self.bags_p + self.bags_n[:num_p]
+        self.labels = self.labels_p + self.labels_n[:num_p]
+        self.names = self.names_p + self.names_n[:num_p]
+        # combined = list(zip(self.bags, self.labels, self.names))
+        # random.shuffle(combined)
+        # self.bags[:], self.labels[:], self.names[:] = zip(*combined)
+
+    def __len__(self):
+        if self.is_train:
+            return len(self.bags_p) * 2
+        else:
+            return len(self.bags)
+
+class PolypDataset_test_wzzx(data.Dataset):
+    def __init__(self, index_root, hp_image_root, nohp_image_root, transform_list, is_transform, is_train=True, testsize=352):
+        file_index = read_index_from_file(index_root)
+        # problem_index = read_index_from_file("/nas/qingcheng.xjw/workspace/MIL-HP/configs/new_data_cross_fold/problem_patient.txt")
+        self.is_train = is_train
+        self.bags = []
+        self.labels= []
+        self.names = []
+
+        self.bags_n = []
+        self.labels_n= []
+        self.names_n = []
+        self.bags_p = []
+        self.labels_p= []
+        self.names_p = []
+
+        for date in os.listdir(hp_image_root):
+            if date not in file_index:
+                continue
+            images = []
+            for f in os.listdir(os.path.join(hp_image_root, date)):
+                if f.endswith('.jpg') or f.endswith('.png') or f.endswith('.bmp') or f.endswith('.BMP') or f.endswith('.JPG') or f.endswith('.Jpg'):
+                # if f.endswith('.jpg'):
+                    images.append(os.path.join(hp_image_root, date, f))
+            
+            if len(images) < 7:
+                continue
+            self.bags.append(images)
+            self.names.append(date)
+            self.labels.append(1)
+            
+            self.bags_p.append(images)
+            self.names_p.append(date)
+            self.labels_p.append(1)
+        
+        for date in os.listdir(nohp_image_root):
+            if date not in file_index:
+                continue
+            images = []
+            for f in os.listdir(os.path.join(nohp_image_root, date)):
+                # if f.endswith('.jpg') or f.endswith('.png') or f.endswith('.bmp') or f.endswith('.BMP') or f.endswith('.JPG') or f.endswith('.Jpg'):
+                if f.endswith('.jpg'):
+                    images.append(os.path.join(nohp_image_root, date, f))
+            
+            if len(images) < 7:
+                continue
+            self.bags.append(images)
+            self.names.append(date)
+            self.labels.append(0)
+
+            self.bags_n.append(images)
+            self.names_n.append(date)
+            self.labels_n.append(0)
+
+        if is_transform:
+            self.transform = self.get_transform(transform_list)
+        else:
+            self.transform = transforms.Compose([
+            transforms.Resize((testsize, testsize)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        
+    @staticmethod
+    def get_transform(transform_list):
+        tfs = []
+        for key, value in zip(transform_list.keys(), transform_list.values()):
+            if value is not None:
+                tf = eval(key)(**value)
+            else:
+                tf = eval(key)()
+            tfs.append(tf)
+        return transforms.Compose(tfs)
+
+    def __getitem__(self, index):
+        images = self.bags[index]
+        label = self.labels[index]
+        name = self.names[index]
+        images_tensor = []
+        label_tensor = []
+        name_tensor = []
+        for img_path in images:
+            image = Image.open(img_path).convert('RGB')
+            if self.is_train:
+                sample = {"image": image}
+                sample = self.transform(sample)
+                images_tensor.append(sample["image"])
+            else:
+                sample = self.transform(image)
+                images_tensor.append(sample)
+            
+            label_tensor.append(torch.tensor(label))
+            name_tensor.append(os.path.split(img_path)[-1])
+        
+        return torch.stack(images_tensor), torch.tensor(label_tensor), name_tensor
+    
+    def random_choose_nocancer_img(self):
+        combined = list(zip(self.bags_n, self.labels_n, self.names_n))
+        random.shuffle(combined)
+        self.bags_n[:], self.labels_n[:], self.names_n[:] = zip(*combined)
+
+        # 正样本数量
+        num_p = len(self.bags_p[:])
+
+        self.bags = self.bags_p + self.bags_n[:num_p]
+        self.labels = self.labels_p + self.labels_n[:num_p]
+        self.names = self.names_p + self.names_n[:num_p]
+        # combined = list(zip(self.bags, self.labels, self.names))
+        # random.shuffle(combined)
+        # self.bags[:], self.labels[:], self.names[:] = zip(*combined)
+
+    def __len__(self):
+        if self.is_train:
+            return len(self.bags_p) * 2
+        else:
+            return len(self.bags)
+    
+class PolypDataset_imglabel(data.Dataset):
+    def __init__(self, image_root, index_root, img_label_root, transform_list, is_transform, is_train=True, testsize=299):
+        img_label_index = read_index_from_file(img_label_root)
+        file_index = read_index_from_file(index_root)
+
+        if not is_train:
+            fuji_index = read_index_from_file("/nas/qingcheng.xjw/workspace/MIL-HP/configs/old_data_cross_fold/fuji.txt")
+        else:
+            fuji_index = []
+        fuji_index = []
+        self.is_train = is_train
+
+        self.imgs = []
+        self.labels = []
+        self.names = []
+        self.pat = set()
+
+        self.imgs_p = []
+        self.labels_p = []
+        self.names_p = []
+        self.pat_p = set()
+        self.imgs_n = []
+        self.labels_n = []
+        self.names_n = []
+        self.pat_n = set()
+
+        for img in img_label_index:
+            img_name = os.path.join(image_root, img.split(" ")[0])
+            pat_index = img_name.split("/")[-2]
+            if pat_index not in file_index:
+                continue
+            img_label = img.split(" ")[1:]
+            self.names.append(img_name)
+            self.imgs.append(img_name)
+            self.labels.append([int(x) for x in img_label])
+            self.pat.add(pat_index)
+
+            if len(img_label) == 0:
+                self.names_n.append(img_name)
+                self.imgs_n.append(img_name)
+                self.labels_n.append([int(x) for x in img_label])
+                self.pat_n.add(pat_index)
+            else:
+                self.names_p.append(img_name)
+                self.imgs_p.append(img_name)
+                self.labels_p.append([int(x) for x in img_label])
+                self.pat_p.add(pat_index)
+
+        if is_transform:
+            self.transform = self.get_transform(transform_list)
+        else:
+            self.transform = transforms.Compose([
+            transforms.Resize((testsize, testsize)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        
+    @staticmethod
+    def get_transform(transform_list):
+        tfs = []
+        for key, value in zip(transform_list.keys(), transform_list.values()):
+            if value is not None:
+                tf = eval(key)(**value)
+            else:
+                tf = eval(key)()
+            tfs.append(tf)
+        return transforms.Compose(tfs)
+
+    def __getitem__(self, index):
+        image_path = self.imgs[index]
+        label = self.labels[index]
+        label_one_hot = torch.zeros(8)
+        # if len(label) == 0:
+        #     label_one_hot[8] = 1
+        for idx, label in enumerate(label):
+            label_one_hot[label] = 1
+
+        image = Image.open(image_path).convert('RGB')
+        if self.is_train:
+            sample = {"image": image}
+            sample = self.transform(sample)
+            image_tensor = sample["image"]
+        else:
+            sample = self.transform(image)
+            image_tensor = sample
+        
+        return image_tensor, label_one_hot, image_path
+    
+    def random_choose_nocancer_img(self):
+        combined = list(zip(self.imgs_n, self.labels_n, self.names_n))
+        random.shuffle(combined)
+        self.imgs_n[:], self.labels_n[:], self.names_n[:] = zip(*combined)
+
+        # 正样本数量
+        num_p = len(self.imgs_p[:])
+
+        self.imgs = self.imgs_p + self.imgs_n[:num_p]
+        self.labels = self.labels_p + self.labels_n[:num_p]
+        self.names = self.names_p + self.names_n[:num_p]
+        # combined = list(zip(self.bags, self.labels, self.names))
+        # random.shuffle(combined)
+        # self.bags[:], self.labels[:], self.names[:] = zip(*combined)
+
+    def __len__(self):
+        if self.is_train:
+            return len(self.imgs_p) * 2
+        else:
+            return len(self.imgs)
+
+
+class PolypDataset_combine(data.Dataset):
+    def __init__(self, bags, labels, names, bags_n, labels_n, names_n, bags_p, labels_p, names_p, transform_list, is_transform, is_train=True, testsize=352):
+        self.is_train = is_train
+        self.bags = bags
+        self.labels= labels
+        self.names = names
+
+        self.bags_n = bags_n
+        self.labels_n= labels_n
+        self.names_n = names_n
+        self.bags_p = bags_p
+        self.labels_p= labels_p
+        self.names_p = names_p
+
+        if is_transform:
+            self.transform = self.get_transform(transform_list)
+        else:
+            self.transform = transforms.Compose([
+            transforms.Resize((testsize, testsize)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        
+    @staticmethod
+    def get_transform(transform_list):
+        tfs = []
+        for key, value in zip(transform_list.keys(), transform_list.values()):
+            if value is not None:
+                tf = eval(key)(**value)
+            else:
+                tf = eval(key)()
+            tfs.append(tf)
+        return transforms.Compose(tfs)
+
+    def __getitem__(self, index):
+        images = self.bags[index]
+        label = self.labels[index]
+        name = self.names[index]
+        images_tensor = []
+        label_tensor = []
+        name_tensor = []
+        for img_path in images:
+            image = Image.open(img_path).convert('RGB')
+            if self.is_train:
+                sample = {"image": image}
+                sample = self.transform(sample)
+                images_tensor.append(sample["image"])
+            else:
+                sample = self.transform(image)
+                images_tensor.append(sample)
+            
+            label_tensor.append(torch.tensor(label))
+            name_tensor.append(os.path.split(img_path)[-1])
+        
+        return torch.stack(images_tensor), torch.tensor(label_tensor), name_tensor
+    
+    def random_choose_nocancer_img(self):
+        combined = list(zip(self.bags_n, self.labels_n, self.names_n))
+        random.shuffle(combined)
+        self.bags_n[:], self.labels_n[:], self.names_n[:] = zip(*combined)
+
+        # 正样本数量
+        num_p = len(self.bags_p[:])
+
+        self.bags = self.bags_p + self.bags_n[:num_p]
+        self.labels = self.labels_p + self.labels_n[:num_p]
+        self.names = self.names_p + self.names_n[:num_p]
+        # combined = list(zip(self.bags, self.labels, self.names))
+        # random.shuffle(combined)
+        # self.bags[:], self.labels[:], self.names[:] = zip(*combined)
+
+    def __len__(self):
+        if self.is_train:
+            return len(self.bags_p) * 2
+        else:
+            return len(self.bags)
+
+
+class PolypDataset_video(data.Dataset):
+    def __init__(self, index_root, hp_image_root, nohp_image_root, transform_list, is_transform, is_train=True, testsize=352,
+                 sample_time=None, sample_frame=None):
+        file_index = read_index_from_file(index_root)
+        pat_index = {}
+        for pat in file_index:
+            pat_name = pat.split(" ")[0]
+            pat_index[pat_name] = pat.split(" ")[1:]
+        # problem_index = read_index_from_file("/nas/qingcheng.xjw/workspace/MIL-HP/configs/new_data_cross_fold/problem_patient.txt")
+        self.is_train = is_train
+        self.bags = []
+        self.labels= []
+        self.names = []
+
+        self.bags_n = []
+        self.labels_n= []
+        self.names_n = []
+        self.bags_p = []
+        self.labels_p= []
+        self.names_p = []
+
+        for date in os.listdir(hp_image_root):
+            if date not in pat_index:
+                continue
+            images = []
+            for f in os.listdir(os.path.join(hp_image_root, date)):
+                # if f.endswith('.jpg') or f.endswith('.png') or f.endswith('.bmp') or f.endswith('.BMP') or f.endswith('.JPG') or f.endswith('.Jpg'):
+                if f.endswith('png'):
+                    images.append(os.path.join(hp_image_root, date, f))
+            
+            fps = int(float(pat_index[date][0]))
+            duration = float(pat_index[date][1])
+            frame_count = int(float(pat_index[date][2]))
+            if sample_time is not None:
+                sample = round(18 * sample_time)
+            if sample_frame is not None:
+                sample = frame_count//sample_frame
+
+            if duration < 120:
+                continue
+            images = images[::sample]
+            self.bags.append(images)
+            self.names.append(date)
+            self.labels.append(1)
+            
+            self.bags_p.append(images)
+            self.names_p.append(date)
+            self.labels_p.append(1)
+        
+        for date in os.listdir(nohp_image_root):
+            if date not in pat_index:
+                continue
+            images = []
+            for f in os.listdir(os.path.join(nohp_image_root, date)):
+                # if f.endswith('.jpg') or f.endswith('.png') or f.endswith('.bmp') or f.endswith('.BMP') or f.endswith('.JPG') or f.endswith('.Jpg'):
+                if f.endswith('png'):
+                    images.append(os.path.join(nohp_image_root, date, f))
+            
+            fps = int(float(pat_index[date][0]))
+            duration = float(pat_index[date][1])
+            frame_count = int(float(pat_index[date][2]))
+            if sample_time is not None:
+                sample = round(18 * sample_time)
+            if sample_frame is not None:
+                sample = frame_count//sample_frame
+
+            if duration < 120:
+                continue
+            images = images[::sample]
+            self.bags.append(images)
+            self.names.append(date)
+            self.labels.append(0)
+
+            self.bags_n.append(images)
+            self.names_n.append(date)
+            self.labels_n.append(0)
+
+        if is_transform:
+            self.transform = self.get_transform(transform_list)
+        else:
+            self.transform = transforms.Compose([
+            transforms.Resize((testsize, testsize)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        
+    @staticmethod
+    def get_transform(transform_list):
+        tfs = []
+        for key, value in zip(transform_list.keys(), transform_list.values()):
+            if value is not None:
+                tf = eval(key)(**value)
+            else:
+                tf = eval(key)()
+            tfs.append(tf)
+        return transforms.Compose(tfs)
+
+    def __getitem__(self, index):
+        images = self.bags[index]
+        label = self.labels[index]
+        name = self.names[index]
+        images_tensor = []
+        label_tensor = []
+        name_tensor = []
+        for img_path in images:
+            image = Image.open(img_path).convert('RGB')
+            if self.is_train:
+                sample = {"image": image}
+                sample = self.transform(sample)
+                images_tensor.append(sample["image"])
+            else:
+                sample = self.transform(image)
+                images_tensor.append(sample)
+            
+            label_tensor.append(torch.tensor(label))
+            name_tensor.append(os.path.split(img_path)[-1])
+        
+        return torch.stack(images_tensor), torch.tensor(label_tensor), name_tensor
+    
+    def random_choose_nocancer_img(self):
+        combined = list(zip(self.bags_n, self.labels_n, self.names_n))
+        random.shuffle(combined)
+        self.bags_n[:], self.labels_n[:], self.names_n[:] = zip(*combined)
+
+        # 正样本数量
+        num_p = len(self.bags_p[:])
+
+        self.bags = self.bags_p + self.bags_n[:num_p]
+        self.labels = self.labels_p + self.labels_n[:num_p]
+        self.names = self.names_p + self.names_n[:num_p]
+        # combined = list(zip(self.bags, self.labels, self.names))
+        # random.shuffle(combined)
+        # self.bags[:], self.labels[:], self.names[:] = zip(*combined)
+
+    def __len__(self):
+        if self.is_train:
+            return len(self.bags_p) * 2
+        else:
+            return len(self.bags)

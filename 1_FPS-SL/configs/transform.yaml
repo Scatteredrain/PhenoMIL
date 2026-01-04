@@ -1,0 +1,58 @@
+weak:
+    resize: 
+        size: [352, 352]
+    # random_scale_crop:
+    #     range: [0.75, 1.25]
+    random_flip:
+        lr: True
+        ud: True
+    random_rotate:
+        range: [0, 359]
+    random_image_enhance:
+        methods: ['contrast', 'sharpness', 'brightness', 'color']
+    tonumpy: NULL
+    normalize: 
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+    totensor: NULL
+
+strong:
+    resize: 
+        size: [352, 352]
+    # random_scale_crop:
+    #     range: [0.75, 1.25]
+    random_flip: # probability -- 0.5
+        lr: True
+        ud: True
+    random_rotate:
+        range: [0, 359]
+    random_image_enhance:
+        methods: ['contrast', 'sharpness', 'brightness', 'color']
+    tonumpy: NULL
+    normalize: 
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+    totensor: NULL
+
+# Enhancing Nasopharyngeal Carcinoma Classification Based on Multi-View Cross-Modal Knowledge Distillation, ISBI 2024
+# transform_list = transforms.Compose(
+#     [
+#         transforms.Resize(256),
+#         transforms.RandomCrop(224),
+#         transforms.RandomHorizontalFlip(p=0.5),
+#         transforms.RandomVerticalFlip(p=0.5),
+#         transforms.RandomRotation(degrees=(-180, +180)),
+#         transforms.RandomApply([transforms.ColorJitter(0.2, 0.2, 0.2, 0.1)]),
+#         transforms.ToTensor(),
+#         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+#     ]
+# )
+
+test:
+    resize: 
+        size: [352, 352]
+    tonumpy: NULL
+    normalize: 
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+    totensor: NULL

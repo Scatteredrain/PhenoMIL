@@ -1,0 +1,81 @@
+topk: 7
+epoch: 300
+batch_size: 1
+instance_batch_size: 20
+img_num: 30
+# train_batch_size: 16 #8
+val_batch_size: 1
+# lstm_lr: 50
+# center_img_lr: 20
+lr: 1.0e-04 #0.0001
+center_lr: 20
+backbone_lr: 0.1
+lstm_random: False
+
+is_center_loss: True
+is_img_loss: False
+is_img_center_loss: False
+attention_constrain: True
+
+joint_learning: False
+
+accumulation_steps: 20
+
+Model:
+    # find_unused_parameters: True
+    name: "pvt_v2_b2" # res2net50_v1b, Xception, pvt_v2_b2
+    channels: 256
+    output_stride: 16
+    MaskDrop_threshold: 0.75
+
+    resume: False
+    # frozen_backbone: False
+    unfrozen_backbone_epoch: 50
+
+transform_list:
+    resize: 
+        size: [352, 352]
+    random_scale_crop:
+        range: [0.75, 1.25]
+    random_flip:
+        lr: True
+        ud: True
+    random_rotate:
+        range: [0, 359]
+    random_image_enhance:
+        methods: ['contrast', 'sharpness', 'brightness', 'color']
+    tonumpy: NULL
+    normalize: 
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+    totensor: NULL
+
+Optimizer:
+    type: "AdamW"
+    weight_decay: 1.0e-4
+    clip: 0.5
+    mixed_precision: False
+
+Scheduler:
+    type: "PolyLr_LSTM"
+    gamma: 0.9
+    minimum_lr: 1.0e-07
+    warmup_iteration: 300
+
+Dataloader:
+    shuffle: True
+    num_workers: 8
+    val_num_workers: 8
+    pin_memory: True
+
+Train:
+    Dataset:
+        type: "PolypDataset"
+        index_root: "./multi_center_training/train_data.txt"
+    Checkpoint:
+        checkpoint_epoch: 1
+
+Test:
+    Dataset:
+        type: "PolypDataset"
+        index_root: "./multi_center_training/eval_data.txt"
